@@ -41,19 +41,38 @@ const session = {
   view: "home",
   flash: null,
   dropdownOpen: false,
+  profileMethodOpen: null,
 };
 
+let flashTimer = null;
+
 /* ============== HELPERS ============== */
-function flash(type, msg) {
+function flash(type, msg, opts = {}) {
+  const { rerender = true } = opts;
   session.flash = { type, msg };
-  render();
-  setTimeout(() => {
+  if (flashTimer) clearTimeout(flashTimer);
+  if (rerender) render();
+  else renderFlash();
+  flashTimer = setTimeout(() => {
     if (session.flash && session.flash.msg === msg) {
       session.flash = null;
-      render();
+      renderFlash();
     }
   }, 4000);
 }
+
+function renderFlash() {
+  const flashMount = document.getElementById("flashMount");
+  if (!flashMount) return;
+
+  if (!session.flash) {
+    flashMount.innerHTML = "";
+    return;
+  }
+
+  flashMount.innerHTML = `<div class="container container-flush-bottom"><div class="flash flash-${session.flash.type}">${session.flash.msg}</div></div>`;
+}
+
 function genCode(len = 10) {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let s = "";
@@ -228,6 +247,47 @@ function renderProfile() {
   const u = users[session.currentUser];
   const m = u.mfa;
 
+  function renderMethodSetupPanel(id) {
+    if (id === "passkey") {
+      return `
+        <div class="mfa-setup-card">
+          <p class="panel-desc">Register a passkey on this device. (Demo: simulated WebAuthn.)</p>
+          <button class="btn btn-primary" id="pkReg">${u.mfa.passkey ? "Re-register passkey" : "Register passkey"}</button>
+        </div>
+      `;
+    }
+
+    if (id === "authenticatorApp") {
+      return `
+        <div class="mfa-setup-card">
+          <p class="panel-desc">Scan the QR code in your authenticator app. (Demo: enter <code>123456</code>.)</p>
+          <div class="qr-placeholder">[QR CODE]</div>
+          <div class="field"><label>Verification code</label><input id="aaCode" maxlength="6" placeholder="000000" /></div>
+          <button class="btn btn-primary" id="aaVerify">Verify & enable</button>
+        </div>
+      `;
+    }
+
+    if (id === "sms") {
+      return `
+        <div class="mfa-setup-card">
+          <p class="panel-desc">Enter your phone number to receive codes. (Demo: any number works; verification code is <code>654321</code>.)</p>
+          <div class="field"><label>Phone number</label><input id="smsPhone" placeholder="+1 555 123 4567" value="${u.mfa.sms || ""}" /></div>
+          <div class="field"><label>Verification code</label><input id="smsCode" maxlength="6" placeholder="000000" /></div>
+          <button class="btn btn-primary" id="smsVerify">Verify & enable</button>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="mfa-setup-card">
+        <p class="panel-desc">Generate a fresh set of one-time recovery codes. Save them somewhere safe - each can only be used once.</p>
+        ${u.mfa.recoveryCodes.length > 0 ? `<div class="codes-grid">${u.mfa.recoveryCodes.map((c) => `<div>${c}</div>`).join("")}</div>` : ""}
+        <button class="btn btn-primary" id="rcGen">${u.mfa.recoveryCodes.length > 0 ? "Regenerate codes" : "Generate codes"}</button>
+      </div>
+    `;
+  }
+
   const methodCard = (opts) => `
     <div class="mfa-method">
       <div class="mfa-icon">${opts.icon}</div>
@@ -245,6 +305,7 @@ function renderProfile() {
         ${opts.configured ? `<button class="btn btn-danger" data-remove="${opts.id}">Remove</button>` : ""}
         <button class="btn ${opts.configured ? "" : "btn-primary"}" data-action="${opts.id}">${opts.configured ? "Edit" : "Add"}</button>
       </div>
+      ${session.profileMethodOpen === opts.id ? `<div class="mfa-method-detail">${renderMethodSetupPanel(opts.id)}</div>` : ""}
     </div>
   `;
 
@@ -302,8 +363,6 @@ function renderProfile() {
           })}
         </div>
       </div>
-
-      <div id="mfaPanel"></div>
     </div>
   `;
 }
@@ -453,10 +512,13 @@ function bindMfa() {
 
 function bindProfile() {
   const u = users[session.currentUser];
-  const panel = document.getElementById("mfaPanel");
 
   document.querySelectorAll("[data-action]").forEach((b) => {
-    b.onclick = () => openMethodPanel(b.getAttribute("data-action"));
+    b.onclick = () => {
+      const id = b.getAttribute("data-action");
+      session.profileMethodOpen = id;
+      render();
+    };
   });
   document.querySelectorAll("[data-primary]").forEach((b) => {
     b.onclick = () => {
@@ -472,74 +534,48 @@ function bindProfile() {
       if (id === "sms") u.mfa.sms = null;
       if (id === "recovery") u.mfa.recoveryCodes = [];
       if (u.mfa.primary === id) u.mfa.primary = null;
+      if (session.profileMethodOpen === id) session.profileMethodOpen = null;
       flash("success", "Method removed");
     };
   });
 
-  function openMethodPanel(id) {
-    if (id === "passkey") {
-      panel.innerHTML = `
-        <div class="card"><div class="card-header">Passkey</div><div class="card-body">
-          <p class="panel-desc">Register a passkey on this device. (Demo: simulated WebAuthn.)</p>
-          <button class="btn btn-primary" id="pkReg">${u.mfa.passkey ? "Re-register passkey" : "Register passkey"}</button>
-        </div></div>`;
-      document.getElementById("pkReg").onclick = () => {
-        const b = document.getElementById("pkReg");
-        b.disabled = true;
-        b.textContent = "Registering...";
-        setTimeout(() => {
-          u.mfa.passkey = true;
-          if (!u.mfa.primary) u.mfa.primary = "passkey";
-          flash("success", "Passkey registered");
-        }, 700);
-      };
-    } else if (id === "authenticatorApp") {
-      panel.innerHTML = `
-        <div class="card"><div class="card-header">Authenticator app</div><div class="card-body">
-          <p class="panel-desc">Scan the QR code in your authenticator app. (Demo: enter <code>123456</code>.)</p>
-          <div class="qr-placeholder">[QR CODE]</div>
-          <div class="field"><label>Verification code</label><input id="aaCode" maxlength="6" placeholder="000000" /></div>
-          <button class="btn btn-primary" id="aaVerify">Verify & enable</button>
-        </div></div>`;
-      document.getElementById("aaVerify").onclick = () => {
-        if (document.getElementById("aaCode").value === "123456") {
-          u.mfa.authenticatorApp = true;
-          if (!u.mfa.primary) u.mfa.primary = "authenticatorApp";
-          flash("success", "Authenticator app enabled");
-        } else flash("error", "Invalid code");
-      };
-    } else if (id === "sms") {
-      panel.innerHTML = `
-        <div class="card"><div class="card-header">SMS / Text message</div><div class="card-body">
-          <p class="panel-desc">Enter your phone number to receive codes. (Demo: any number works; verification code is <code>654321</code>.)</p>
-          <div class="field"><label>Phone number</label><input id="smsPhone" placeholder="+1 555 123 4567" value="${u.mfa.sms || ""}" /></div>
-          <div class="field"><label>Verification code</label><input id="smsCode" maxlength="6" placeholder="000000" /></div>
-          <button class="btn btn-primary" id="smsVerify">Verify & enable</button>
-        </div></div>`;
-      document.getElementById("smsVerify").onclick = () => {
-        const phone = document.getElementById("smsPhone").value.trim();
-        if (!phone) {
-          flash("error", "Phone number required");
-          return;
-        }
-        if (document.getElementById("smsCode").value === "654321") {
-          u.mfa.sms = phone;
-          if (!u.mfa.primary) u.mfa.primary = "sms";
-          flash("success", "SMS enabled");
-        } else flash("error", "Invalid code");
-      };
-    } else if (id === "recovery") {
-      panel.innerHTML = `
-        <div class="card"><div class="card-header">Recovery codes</div><div class="card-body">
-          <p class="panel-desc">Generate a fresh set of one-time recovery codes. Save them somewhere safe - each can only be used once.</p>
-          ${u.mfa.recoveryCodes.length > 0 ? `<div class="codes-grid">${u.mfa.recoveryCodes.map((c) => `<div>${c}</div>`).join("")}</div>` : ""}
-          <button class="btn btn-primary" id="rcGen">${u.mfa.recoveryCodes.length > 0 ? "Regenerate codes" : "Generate codes"}</button>
-        </div></div>`;
-      document.getElementById("rcGen").onclick = () => {
-        u.mfa.recoveryCodes = Array.from({ length: 5 }, () => genCode(10));
-        flash("success", "Recovery codes generated");
-      };
-    }
+  if (session.profileMethodOpen === "passkey") {
+    document.getElementById("pkReg").onclick = () => {
+      const b = document.getElementById("pkReg");
+      b.disabled = true;
+      b.textContent = "Registering...";
+      setTimeout(() => {
+        u.mfa.passkey = true;
+        if (!u.mfa.primary) u.mfa.primary = "passkey";
+        flash("success", "Passkey registered");
+      }, 700);
+    };
+  } else if (session.profileMethodOpen === "authenticatorApp") {
+    document.getElementById("aaVerify").onclick = () => {
+      if (document.getElementById("aaCode").value === "123456") {
+        u.mfa.authenticatorApp = true;
+        if (!u.mfa.primary) u.mfa.primary = "authenticatorApp";
+        flash("success", "Authenticator app enabled");
+      } else flash("error", "Invalid code");
+    };
+  } else if (session.profileMethodOpen === "sms") {
+    document.getElementById("smsVerify").onclick = () => {
+      const phone = document.getElementById("smsPhone").value.trim();
+      if (!phone) {
+        flash("error", "Phone number required");
+        return;
+      }
+      if (document.getElementById("smsCode").value === "654321") {
+        u.mfa.sms = phone;
+        if (!u.mfa.primary) u.mfa.primary = "sms";
+        flash("success", "SMS enabled");
+      } else flash("error", "Invalid code");
+    };
+  } else if (session.profileMethodOpen === "recovery") {
+    document.getElementById("rcGen").onclick = () => {
+      u.mfa.recoveryCodes = Array.from({ length: 5 }, () => genCode(10));
+      flash("success", "Recovery codes generated");
+    };
   }
 }
 
@@ -549,9 +585,6 @@ function render() {
 
   const app = document.getElementById("app");
   let html = "";
-  if (session.flash) {
-    html += `<div class="container container-flush-bottom"><div class="flash flash-${session.flash.type}">${session.flash.msg}</div></div>`;
-  }
 
   if (session.view === "profile" && !session.currentUser) session.view = "home";
   if (session.view === "mfa" && !session.pendingMfaUser) session.view = "login";
@@ -563,6 +596,7 @@ function render() {
   else if (session.view === "profile") html += renderProfile();
 
   app.innerHTML = html;
+  renderFlash();
   renderTopbar();
 
   if (session.view === "home") bindHome();

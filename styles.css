@@ -173,6 +173,7 @@ body {
   display: flex;
   align-items: flex-start;
   gap: 16px;
+  flex-wrap: wrap;
   padding: 20px;
   border-bottom: 1px solid #30363d;
 }
@@ -210,6 +211,17 @@ body {
   gap: 8px;
   flex-shrink: 0;
   align-items: center;
+}
+.mfa-method-detail {
+  flex: 0 0 100%;
+  margin-top: 10px;
+  margin-left: 48px;
+}
+.mfa-setup-card {
+  background: #0b1220;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 16px;
 }
 .badge {
   font-size: 11px;
