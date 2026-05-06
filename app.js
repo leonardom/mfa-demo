@@ -6,7 +6,7 @@ const users = {
     mfa: {
       recoveryCodes: null,
       passkey: null,
-      authenticatorApp: false,
+      totp: null,
       sms: null,
       primary: null,
     },
@@ -17,7 +17,7 @@ const users = {
     mfa: {
       recoveryCodes: false,
       passkey: false,
-      authenticatorApp: false,
+      totp: null,
       sms: null,
       primary: null,
     },
@@ -75,7 +75,7 @@ function renderFlash() {
 function hasAnyMfa(u) {
   return (
     u.mfa.passkey ||
-    u.mfa.authenticatorApp ||
+    u.mfa.totp ||
     u.mfa.sms ||
     u.mfa.recoveryCodes
   );
@@ -94,6 +94,13 @@ async function loadUserMfaMethods(u) {
 		}
 		if (m.methodType.toLowerCase() == "recoverycode") {
 			u.mfa.recoveryCodes = {
+				methodId: m.methodId,
+				displayName: m.displayName,
+				isPrimary: m.isPrimary
+			};
+		}
+		if (m.methodType.toLowerCase() == "totp") {
+			u.mfa.totp = {
 				methodId: m.methodId,
 				displayName: m.displayName,
 				isPrimary: m.isPrimary
@@ -236,8 +243,8 @@ function renderMfaChallenge() {
   const methods = [];
   if (u.mfa.passkey) 
 	methods.push({ id: "passkey", label: "Passkey", methodId: u.mfa.passkey.methodId, primary: u.mfa.passkey.isPrimary });
-  if (u.mfa.authenticatorApp)
-    methods.push({ id: "authenticatorApp", label: "Authenticator app" });
+  if (u.mfa.totp)
+    methods.push({ id: "totp", label: "Authenticator app" });
   if (u.mfa.sms) 
 	methods.push({ id: "sms", label: `SMS (${u.mfa.sms})` });
   if (u.mfa.recoveryCodes)
@@ -280,11 +287,17 @@ function renderProfile() {
       `;
     }
 
-    if (id === "authenticatorApp") {
+    if (id === "totp") {
+	  setTimeout(async () => {  
+	    const data = await startTotpEnrollment(u.username);
+		const qrcode = document.getElementById("totpQrCode");
+		qrcode.innerHTML = `<img src="data:image:png;base64;${data.totp.qrCodeBase64}" width="140" height="140"/>`
+	  }, 100);
+	   
       return `
         <div class="mfa-setup-card">
-          <p class="panel-desc">Scan the QR code in your authenticator app. (Demo: enter <code>123456</code>.)</p>
-          <div class="qr-placeholder">[QR CODE]</div>
+          <p class="panel-desc">Scan the QR code in your authenticator app.</p>
+          <div class="qr-placeholder" id="totpQrCode">[QR CODE]</div>
           <div class="field"><label>Verification code</label><input id="aaCode" maxlength="6" placeholder="000000" /></div>
           <button class="btn btn-primary" id="aaVerify">Verify & enable</button>
         </div>
@@ -353,12 +366,12 @@ function renderProfile() {
             canBePrimary: true,
           })}
           ${methodCard({
-            id: "authenticatorApp",
+            id: "totp",
             icon: '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2" width="12" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/></svg>',
             title: "Authenticator app",
             desc: "Use an authenticator app to get one-time codes when prompted.",
-            configured: m.authenticatorApp,
-            isPrimary: m.authenticatorApp && m.authenticatorApp.isPrimary,
+            configured: m.totp,
+            isPrimary: m.totp && m.totp.isPrimary,
             canBePrimary: true,
           })}
           ${methodCard({
@@ -457,11 +470,10 @@ function bindSignup() {
       username,
       password,
       mfa: {
-        recoveryCodes: false,
-        passkey: false,
-        authenticatorApp: false,
+        recoveryCodes: null,
+        passkey: null,
+        totp: null,
         sms: null,
-        primary: null,
       },
     };
     session.currentUser = username;
@@ -488,7 +500,7 @@ function bindMfa() {
     const m = sel.value;
     if (m === "passkey")
       area.innerHTML = `<p class="hint-text">Click Verify to authenticate with your passkey.</p>`;
-    else if (m === "authenticatorApp")
+    else if (m === "totp")
       area.innerHTML = `<div class="field"><label>6-digit code</label><input id="mfaCode" maxlength="6" placeholder="000000" /></div><p class="hint-subtle">Demo: enter <code>123456</code></p>`;
     else if (m === "sms")
       area.innerHTML = `<div class="field"><label>SMS code sent to ${u.mfa.sms}</label><input id="mfaCode" maxlength="6" placeholder="000000" /></div><p class="hint-subtle">Demo: enter <code>654321</code></p>`;
@@ -510,7 +522,7 @@ function bindMfa() {
 		let ok = false;
 		if (m === "passkey") {
 			ok = await submitPasskeyChallenge(u.username, methodId);
-		} else if (m === "authenticatorApp") {
+		} else if (m === "totp") {
 			ok = document.getElementById("mfaCode").value === "123456";
 		} else if (m === "sms") {
 			ok = document.getElementById("mfaCode").value === "654321";
@@ -561,7 +573,7 @@ function bindProfile() {
     b.onclick = () => {
       const id = b.getAttribute("data-remove");
       if (id === "passkey") u.mfa.passkey = false;
-      if (id === "authenticatorApp") u.mfa.authenticatorApp = false;
+      if (id === "totp") u.mfa.totp = false;
       if (id === "sms") u.mfa.sms = null;
       if (id === "recovery") u.mfa.recoveryCodes = [];
       if (u.mfa.primary === id) u.mfa.primary = null;
@@ -583,13 +595,17 @@ function bindProfile() {
 			}
 		})();
     };
-  } else if (session.profileMethodOpen === "authenticatorApp") {
+  } else if (session.profileMethodOpen === "totp") {
     document.getElementById("aaVerify").onclick = () => {
-      if (document.getElementById("aaCode").value === "123456") {
-        u.mfa.authenticatorApp = true;
-        if (!u.mfa.primary) u.mfa.primary = "authenticatorApp";
-        flash("success", "Authenticator app enabled");
-      } else flash("error", "Invalid code");
+	  (async () => {
+		const code = document.getElementById("aaCode").value;
+		const valid = await completeTotpEnrollment(u.username, code);
+		if (valid) {
+		  await loadUserMfaMethods(u);
+          flash("success", "Authenticator app enabled");
+		  // renderProfile();
+		} else flash("error", "Invalid code");  
+	  })();
     };
   } else if (session.profileMethodOpen === "sms") {
     document.getElementById("smsVerify").onclick = () => {

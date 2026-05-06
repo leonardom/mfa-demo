@@ -266,6 +266,62 @@ async function submitRecoveryCodesRotate(userId)
 	}		
 }
 
+// Totp start enrollment
+async function startTotpEnrollment(userId) {
+	try {
+		const payload = {
+			displayName: `TOTP for ${userId}`,
+			issuer: "MFA Demo App"
+		};
+		const endpoint = apiBaseUrl + '/users/' + userId + '/mfa/totp/enrollments';
+		const response = await fetch(endpoint, {
+			method: 'POST' ,
+			headers: {
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify(payload)
+		});
+		console.log("Request response:", response);	
+		
+		const result = await response.json();
+		console.log("Success:", result);
+		
+		return result.data;
+	}
+	catch(err) {
+		console.error("Error:", err);
+		flash("error", "Totp enrollment failed");
+	}
+}
+
+// Totp start enrollment
+async function completeTotpEnrollment(userId, code) {
+	try {
+		const payload = {
+			code
+		};
+		const endpoint = apiBaseUrl + '/users/' + userId + '/mfa/totp/enrollments/confirm';
+		const response = await fetch(endpoint, {
+			method: 'POST' ,
+			headers: {
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify(payload)
+		});
+		console.log("Request response:", response);	
+		
+		const result = await response.json();
+		console.log("Success:", result);
+		
+		return result.data.isValid;
+	}
+	catch(err) {
+		console.error("Error:", err);
+		flash("error", "Totp enrollment failed");
+		return false;
+	}
+}
+
 // MFA Recovery Code
 async function verifyRecoveryCode(userId, methodId, code) {
 	const challengeId = await submitRecoveryCodeChallenge(userId, methodId);
