@@ -1,32 +1,21 @@
 /* ============== STATE ============== */
 const users = {
-  user1: {
-    username: "user1",
+  demo1: {
+    username: "demo1",
     password: "password123",
     mfa: {
-      recoveryCodes: [],
-      passkey: false,
+      recoveryCodes: null,
+      passkey: null,
       authenticatorApp: false,
       sms: null,
       primary: null,
     },
   },
-  user2: {
-    username: "user2",
+  demo2: {
+    username: "demo2",
     password: "password123",
     mfa: {
-      recoveryCodes: [],
-      passkey: false,
-      authenticatorApp: false,
-      sms: null,
-      primary: null,
-    },
-  },
-  user3: {
-    username: "user3",
-    password: "password123",
-    mfa: {
-      recoveryCodes: [],
+      recoveryCodes: false,
       passkey: false,
       authenticatorApp: false,
       sms: null,
@@ -47,6 +36,16 @@ const session = {
 let flashTimer = null;
 
 /* ============== HELPERS ============== */
+
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    console.log('Text copied to clipboard!');
+  } catch (err) {
+    console.error('Failed to copy: ', err);
+  }
+}
+
 function flash(type, msg, opts = {}) {
   const { rerender = true } = opts;
   session.flash = { type, msg };
@@ -73,20 +72,34 @@ function renderFlash() {
   flashMount.innerHTML = `<div class="container container-flush-bottom"><div class="flash flash-${session.flash.type}">${session.flash.msg}</div></div>`;
 }
 
-function genCode(len = 10) {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let s = "";
-  for (let i = 0; i < len; i++)
-    s += chars[Math.floor(Math.random() * chars.length)];
-  return s;
-}
 function hasAnyMfa(u) {
   return (
     u.mfa.passkey ||
     u.mfa.authenticatorApp ||
     u.mfa.sms ||
-    u.mfa.recoveryCodes.length > 0
+    u.mfa.recoveryCodes
   );
+}
+
+async function loadUserMfaMethods(u) {
+	const methods = await getMfaMethodsByUserId(u.username);
+	console.log("User MFA methods:", methods);
+	methods.forEach(m => {
+		if (m.methodType.toLowerCase() == "passkey") {
+			u.mfa.passkey = {
+				methodId: m.methodId,
+				displayName: m.displayName,
+				isPrimary: m.isPrimary
+			};
+		}
+		if (m.methodType.toLowerCase() == "recoverycode") {
+			u.mfa.recoveryCodes = {
+				methodId: m.methodId,
+				displayName: m.displayName,
+				isPrimary: m.isPrimary
+			};
+		}
+	});
 }
 
 /* ============== TOP BAR ============== */
@@ -156,15 +169,14 @@ function renderHome() {
     <div class="container">
       <div class="hero">
         <h1>Welcome to MFA Demo</h1>
-        <p>A frontend-only demonstration of multi-factor authentication flows: passkeys, authenticator apps, SMS, and recovery codes.</p>
+        <p>A demonstration of multi-factor authentication flows: passkeys, authenticator apps, SMS, and recovery codes.</p>
         <div class="hero-actions">
           <button class="btn btn-primary btn-lg" id="heroSignin">Sign in</button>
           <button class="btn btn-lg" id="heroSignup">Create account</button>
         </div>
         <p class="hero-demo">
-          Demo accounts: <code class="inline-code-pill">user1</code> /
-          <code class="inline-code-pill">user2</code> /
-          <code class="inline-code-pill">user3</code> · password: <code class="inline-code-pill">password123</code>
+          Demo accounts: <code class="inline-code-pill">demo1</code> /
+          <code class="inline-code-pill">demo2</code> · password: <code class="inline-code-pill">password123</code>
         </p>
       </div>
     </div>
@@ -177,7 +189,7 @@ function renderLogin() {
       <div class="card auth-card">
         <div class="card-body">
           <h2 class="center-title">Sign in</h2>
-          <div class="field"><label>Username</label><input id="liUser" autocomplete="username" /></div>
+          <div class="field"><label>Username</label><input id="liUser" autocomplete="username" autofocus/></div>
           <div class="field"><label>Password</label><input id="liPass" type="password" autocomplete="current-password" /></div>
           <button class="btn btn-primary btn-block" id="liSubmit">Sign in</button>
           <p class="auth-switch-text">
@@ -210,17 +222,14 @@ function renderSignup() {
 function renderMfaChallenge() {
   const u = users[session.pendingMfaUser];
   const methods = [];
-  if (u.mfa.passkey) methods.push({ id: "passkey", label: "Passkey" });
+  if (u.mfa.passkey) 
+	methods.push({ id: "passkey", label: "Passkey", methodId: u.mfa.passkey.methodId, primary: u.mfa.passkey.isPrimary });
   if (u.mfa.authenticatorApp)
     methods.push({ id: "authenticatorApp", label: "Authenticator app" });
-  if (u.mfa.sms) methods.push({ id: "sms", label: `SMS (${u.mfa.sms})` });
-  if (u.mfa.recoveryCodes.length > 0)
-    methods.push({ id: "recovery", label: "Recovery code" });
-
-  const primary =
-    u.mfa.primary && methods.find((m) => m.id === u.mfa.primary)
-      ? u.mfa.primary
-      : methods[0]?.id;
+  if (u.mfa.sms) 
+	methods.push({ id: "sms", label: `SMS (${u.mfa.sms})` });
+  if (u.mfa.recoveryCodes)
+    methods.push({ id: "recovery", label: "Recovery code", methodId: u.mfa.recoveryCodes.methodId, primary: u.mfa.recoveryCodes.isPrimary  });
 
   return `
     <div class="container">
@@ -231,7 +240,9 @@ function renderMfaChallenge() {
           <div class="field mfa-method-field">
             <label>Method</label>
             <select id="mfaMethod" class="input-select">
-              ${methods.map((m) => `<option value="${m.id}" ${m.id === primary ? "selected" : ""}>${m.label}${m.id === u.mfa.primary ? " (primary)" : ""}</option>`).join("")}
+              ${methods.map((m) => 
+				`<option value="${m.id}" ${m.primary ? "selected" : ""} data-method-id="${m.methodId}">${m.label}${m.primary ? " (primary)" : ""}</option>`
+			  ).join("")}
             </select>
           </div>
           <div id="mfaInputArea"></div>
@@ -251,7 +262,7 @@ function renderProfile() {
     if (id === "passkey") {
       return `
         <div class="mfa-setup-card">
-          <p class="panel-desc">Register a passkey on this device. (Demo: simulated WebAuthn.)</p>
+          <p class="panel-desc">Register a passkey on this device.</p>
           <button class="btn btn-primary" id="pkReg">${u.mfa.passkey ? "Re-register passkey" : "Register passkey"}</button>
         </div>
       `;
@@ -282,8 +293,9 @@ function renderProfile() {
     return `
       <div class="mfa-setup-card">
         <p class="panel-desc">Generate a fresh set of one-time recovery codes. Save them somewhere safe - each can only be used once.</p>
-        ${u.mfa.recoveryCodes.length > 0 ? `<div class="codes-grid">${u.mfa.recoveryCodes.map((c) => `<div>${c}</div>`).join("")}</div>` : ""}
-        <button class="btn btn-primary" id="rcGen">${u.mfa.recoveryCodes.length > 0 ? "Regenerate codes" : "Generate codes"}</button>
+		<div id="plaintextRecoveryCodes" class="codes-grid hidden"></div>
+        <button class="btn btn-primary" id="rcGen">${u.mfa.recoveryCodes ? "Regenerate codes" : "Generate codes"}</button>
+		<button class="btn hidden" id="rcGenCopy">Copy codes</button>
       </div>
     `;
   }
@@ -325,7 +337,7 @@ function renderProfile() {
             title: "Passkey",
             desc: "Use a passkey (Face ID, Touch ID, or security key) for phishing-resistant sign-in.",
             configured: m.passkey,
-            isPrimary: m.primary === "passkey",
+            isPrimary: m.passkey && m.passkey.isPrimary,
             canBePrimary: true,
           })}
           ${methodCard({
@@ -334,7 +346,7 @@ function renderProfile() {
             title: "Authenticator app",
             desc: "Use an authenticator app to get one-time codes when prompted.",
             configured: m.authenticatorApp,
-            isPrimary: m.primary === "authenticatorApp",
+            isPrimary: m.authenticatorApp && m.authenticatorApp.isPrimary,
             canBePrimary: true,
           })}
           ${methodCard({
@@ -345,7 +357,7 @@ function renderProfile() {
               ? `Codes sent to ${m.sms}. Less secure than other methods.`
               : "Get one-time codes via SMS. Less secure — use only as a fallback.",
             configured: !!m.sms,
-            isPrimary: m.primary === "sms",
+            isPrimary: m.sms && m.sms.isPrimary,
             canBePrimary: true,
             warn: "Less secure",
           })}
@@ -354,10 +366,10 @@ function renderProfile() {
             icon: '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15v2m0 0v2m0-2h2m-2 0h-2"/><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
             title: "Recovery codes",
             desc:
-              m.recoveryCodes.length > 0
-                ? `${m.recoveryCodes.length} unused recovery code(s) remaining. Use only when other methods are unavailable.`
+              m.recoveryCodes
+                ? "Use only when other methods are unavailable."
                 : "Generate one-time codes to use if you lose access to your other methods.",
-            configured: m.recoveryCodes.length > 0,
+            configured: m.recoveryCodes,
             isPrimary: false,
             canBePrimary: false,
           })}
@@ -381,22 +393,30 @@ function bindHome() {
 
 function bindLogin() {
   const submit = () => {
-    const username = document.getElementById("liUser").value.trim();
-    const password = document.getElementById("liPass").value;
-    const u = users[username];
-    if (!u || u.password !== password) {
-      flash("error", "Invalid username or password");
-      return;
-    }
-    if (hasAnyMfa(u)) {
-      session.pendingMfaUser = username;
-      session.view = "mfa";
-      render();
-    } else {
-      session.currentUser = username;
-      session.view = "profile";
-      flash("success", `Welcome, ${username}!`);
-    }
+	(async () => {
+		const btn = document.getElementById("liSubmit");
+		btn.textContent = 'Signing in...';
+		btn.disabled = true;
+		const username = document.getElementById("liUser").value.trim();
+		const password = document.getElementById("liPass").value;
+		const u = users[username];
+		if (!u || u.password !== password) {
+		  btn.textContent = 'Sign in';
+		  btn.disabled = false;
+		  flash("error", "Invalid username or password");
+		  return;
+		}
+		await loadUserMfaMethods(u);
+		if (hasAnyMfa(u)) {
+		  session.pendingMfaUser = username;
+		  session.view = "mfa";
+		  render();
+		} else {
+		  session.currentUser = username;
+		  session.view = "profile";
+		  flash("success", `Welcome, ${username}!`);
+		}
+	})();	
   };
   document.getElementById("liSubmit").onclick = submit;
   ["liUser", "liPass"].forEach((id) =>
@@ -426,7 +446,7 @@ function bindSignup() {
       username,
       password,
       mfa: {
-        recoveryCodes: [],
+        recoveryCodes: false,
         passkey: false,
         authenticatorApp: false,
         sms: null,
@@ -453,7 +473,6 @@ function bindMfa() {
   const u = users[session.pendingMfaUser];
   const sel = document.getElementById("mfaMethod");
   const area = document.getElementById("mfaInputArea");
-
   function updateInput() {
     const m = sel.value;
     if (m === "passkey")
@@ -470,38 +489,39 @@ function bindMfa() {
 
   document.getElementById("mfaVerify").onclick = () => {
     const m = sel.value;
+	const selectedOption = sel.selectedOptions[0];
+	const methodId = selectedOption.dataset.methodId;
     const btn = document.getElementById("mfaVerify");
     btn.disabled = true;
     btn.textContent = "Verifying...";
-    setTimeout(() => {
-      let ok = false;
-      if (m === "passkey") ok = true;
-      else if (m === "authenticatorApp")
-        ok = document.getElementById("mfaCode").value === "123456";
-      else if (m === "sms")
-        ok = document.getElementById("mfaCode").value === "654321";
-      else if (m === "recovery") {
-        const code = document
-          .getElementById("mfaCode")
-          .value.trim()
-          .toUpperCase();
-        const idx = u.mfa.recoveryCodes.indexOf(code);
-        if (idx >= 0) {
-          u.mfa.recoveryCodes.splice(idx, 1);
-          ok = true;
-        }
-      }
-      if (ok) {
-        session.currentUser = session.pendingMfaUser;
-        session.pendingMfaUser = null;
-        session.view = "profile";
-        flash("success", "Verified successfully");
-      } else {
-        btn.disabled = false;
-        btn.textContent = "Verify";
-        flash("error", "Verification failed");
-      }
-    }, 600);
+
+	(async () => {
+		let ok = false;
+		if (m === "passkey") {
+			ok = await submitPasskeyChallenge(u.username, methodId);
+		} else if (m === "authenticatorApp") {
+			ok = document.getElementById("mfaCode").value === "123456";
+		} else if (m === "sms") {
+			ok = document.getElementById("mfaCode").value === "654321";
+		}
+		else if (m === "recovery") {
+			const code = document
+			  .getElementById("mfaCode")
+			  .value.trim()
+			  .toUpperCase();
+			ok = await verifyRecoveryCode(u.username, methodId, code);
+		}
+		if (ok) {
+			session.currentUser = session.pendingMfaUser;
+			session.pendingMfaUser = null;
+			session.view = "profile";
+			flash("success", "Verified successfully");
+		} else {
+			btn.disabled = false;
+			btn.textContent = "Verify";
+			flash("error", "Verification failed");
+		}
+	})();
   };
   document.getElementById("mfaCancel").onclick = () => {
     session.pendingMfaUser = null;
@@ -538,17 +558,19 @@ function bindProfile() {
       flash("success", "Method removed");
     };
   });
-
+  
   if (session.profileMethodOpen === "passkey") {
     document.getElementById("pkReg").onclick = () => {
-      const b = document.getElementById("pkReg");
-      b.disabled = true;
-      b.textContent = "Registering...";
-      setTimeout(() => {
-        u.mfa.passkey = true;
-        if (!u.mfa.primary) u.mfa.primary = "passkey";
-        flash("success", "Passkey registered");
-      }, 700);
+		(async() => {
+			const b = document.getElementById("pkReg");
+			b.disabled = true;
+			b.textContent = "Registering...";
+			if (await startPasskeyEnrollment(u.username)) {
+				await loadUserMfaMethods(u);
+				flash("success", "Passkey registered");
+				renderProfile();
+			}
+		})();
     };
   } else if (session.profileMethodOpen === "authenticatorApp") {
     document.getElementById("aaVerify").onclick = () => {
@@ -573,8 +595,21 @@ function bindProfile() {
     };
   } else if (session.profileMethodOpen === "recovery") {
     document.getElementById("rcGen").onclick = () => {
-      u.mfa.recoveryCodes = Array.from({ length: 5 }, () => genCode(10));
-      flash("success", "Recovery codes generated");
+		(async () => {
+			const codes = await submitRecoveryCodesRotate(u.username);
+			console.log("Codes", codes);
+			u.mfa.recoveryCodes = codes.length > 0;
+			const div = document.getElementById('plaintextRecoveryCodes');
+			const html = `${codes.map((c) => `<div>${c}</div>`).join("")}`;
+			div.innerHTML = html;
+			div.classList.toggle('hidden');
+			const copyBtn = document.getElementById('rcGenCopy');
+			copyBtn.onclick = () => {
+				copyToClipboard(`${codes.join("\n")}`);
+				flash("success", "Codes copied to clipboard");
+			};
+			copyBtn.classList.toggle('hidden');
+		})();	
     };
   }
 }

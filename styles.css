@@ -213,7 +213,7 @@ body {
   align-items: center;
 }
 .mfa-method-detail {
-  flex: 0 0 100%;
+  flex: 0 0 95%;
   margin-top: 10px;
   margin-left: 48px;
 }
@@ -454,3 +454,7 @@ body {
   font-size: 12px;
   color: #8b949e;
 }
+.hidden {
+  display: none !important;
+}
+
