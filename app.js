@@ -158,7 +158,7 @@ function renderTopbar() {
     };
   }
   document.getElementById("brandBtn").onclick = () => {
-    session.view = session.currentUser ? "profile" : "home";
+    session.view = session.currentUser ? "welcome" : "home";
     render();
   };
 }
@@ -180,6 +180,18 @@ function renderHome() {
         </p>
       </div>
     </div>
+  `;
+}
+
+function renderWelcome() {
+  const u = users[session.currentUser];
+  return `
+    <div class="container">
+      <div class="profile-heading">
+        <h1 class="profile-title">Welcome ${u.username}!</h1>
+        <p class="profile-subtitle">You have logged in successfully. Your can manage your two-factor authentication methods accessing your user profile.</p>
+      </div>
+	</div>
   `;
 }
 
@@ -314,7 +326,7 @@ function renderProfile() {
       </div>
       <div class="mfa-actions">
         ${opts.configured && !opts.isPrimary && opts.canBePrimary ? `<button class="btn" data-primary="${opts.id}">Set primary</button>` : ""}
-        ${opts.configured ? `<button class="btn btn-danger" data-remove="${opts.id}">Remove</button>` : ""}
+        ${opts.configured ? `<button class="btn btn-danger hidden" data-remove="${opts.id}">Remove</button>` : ""}
         <button class="btn ${opts.configured ? "" : "btn-primary"}" data-action="${opts.id}">${opts.configured ? "Edit" : "Add"}</button>
       </div>
       ${session.profileMethodOpen === opts.id ? `<div class="mfa-method-detail">${renderMethodSetupPanel(opts.id)}</div>` : ""}
@@ -413,8 +425,7 @@ function bindLogin() {
 		  render();
 		} else {
 		  session.currentUser = username;
-		  session.view = "profile";
-		  flash("success", `Welcome, ${username}!`);
+		  session.view = "welcome";
 		}
 	})();	
   };
@@ -454,7 +465,7 @@ function bindSignup() {
       },
     };
     session.currentUser = username;
-    session.view = "profile";
+    session.view = "welcome";
     flash("success", `Account created. Welcome, ${username}!`);
   };
   document.getElementById("suSubmit").onclick = submit;
@@ -514,7 +525,7 @@ function bindMfa() {
 		if (ok) {
 			session.currentUser = session.pendingMfaUser;
 			session.pendingMfaUser = null;
-			session.view = "profile";
+			session.view = "welcome";
 			flash("success", "Verified successfully");
 		} else {
 			btn.disabled = false;
@@ -625,6 +636,7 @@ function render() {
   if (session.view === "mfa" && !session.pendingMfaUser) session.view = "login";
 
   if (session.view === "home") html += renderHome();
+  else if (session.view == "welcome") html += renderWelcome();
   else if (session.view === "login") html += renderLogin();
   else if (session.view === "signup") html += renderSignup();
   else if (session.view === "mfa") html += renderMfaChallenge();

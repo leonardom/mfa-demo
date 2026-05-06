@@ -37,17 +37,23 @@ function base64urlToArrayBuffer(base64url) {
 let credentialID = null;
 
 async function getMfaMethodsByUserId(userId) {
-	const endpoint = apiBaseUrl + '/users/' + userId + "/mfa/methods";
-	const response = await fetch(endpoint, {
-		method: 'GET' ,
-		headers: {
-			'Content-Type': 'application/json',
-		}
-	});
-	
-	const result = await response.json();
-	console.log("Success:", result);		
-	return result.data.methods;
+	try {
+		const endpoint = apiBaseUrl + '/users/' + userId + "/mfa/methods";
+		const response = await fetch(endpoint, {
+			method: 'GET' ,
+			headers: {
+				'Content-Type': 'application/json',
+			}
+		});
+		
+		const result = await response.json();
+		console.log("Success:", result);		
+		return result.data.methods;
+	} catch(err) {
+		console.error("Error:", err);
+		flash("error", "Could not connect to MFA API");
+		return [];
+	}
 }
 
 // Start Passkey Enrollment
