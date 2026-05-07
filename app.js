@@ -107,6 +107,7 @@ async function loadUserMfaMethods(u) {
 			};
 		}
 	});
+	console.log("Logged user MFA:", u.mfa);	
 }
 
 /* ============== TOP BAR ============== */
@@ -244,7 +245,7 @@ function renderMfaChallenge() {
   if (u.mfa.passkey) 
 	methods.push({ id: "passkey", label: "Passkey", methodId: u.mfa.passkey.methodId, primary: u.mfa.passkey.isPrimary });
   if (u.mfa.totp)
-    methods.push({ id: "totp", label: "Authenticator app" });
+    methods.push({ id: "totp", label: "Authenticator app", methodId: u.mfa.totp.methodId, primary: u.mfa.totp.isPrimary });
   if (u.mfa.sms) 
 	methods.push({ id: "sms", label: `SMS (${u.mfa.sms})` });
   if (u.mfa.recoveryCodes)
@@ -288,11 +289,12 @@ function renderProfile() {
     }
 
     if (id === "totp") {
+
 	  setTimeout(async () => {  
 	    const data = await startTotpEnrollment(u.username);
 		const qrcode = document.getElementById("totpQrCode");
 		qrcode.innerHTML = `<img src="data:image:png;base64;${data.totp.qrCodeBase64}" width="140" height="140"/>`
-	  }, 100);
+	  }, 10);
 	   
       return `
         <div class="mfa-setup-card">
@@ -338,7 +340,7 @@ function renderProfile() {
         <div class="mfa-desc">${opts.desc}</div>
       </div>
       <div class="mfa-actions">
-        ${opts.configured && !opts.isPrimary && opts.canBePrimary ? `<button class="btn" data-primary="${opts.id}">Set primary</button>` : ""}
+        ${opts.configured && !opts.isPrimary && opts.canBePrimary ? `<button class="btn" data-primary="${opts.id}" data-primary-method-id="${opts.methodId}">Set primary</button>` : ""}
         ${opts.configured ? `<button class="btn btn-danger hidden" data-remove="${opts.id}">Remove</button>` : ""}
         <button class="btn ${opts.configured ? "" : "btn-primary"}" data-action="${opts.id}">${opts.configured ? "Edit" : "Add"}</button>
       </div>
@@ -364,6 +366,7 @@ function renderProfile() {
             configured: m.passkey,
             isPrimary: m.passkey && m.passkey.isPrimary,
             canBePrimary: true,
+			methodId: m.passkey?.methodId,
           })}
           ${methodCard({
             id: "totp",
@@ -371,9 +374,11 @@ function renderProfile() {
             title: "Authenticator app",
             desc: "Use an authenticator app to get one-time codes when prompted.",
             configured: m.totp,
-            isPrimary: m.totp && m.totp.isPrimary,
+            isPrimary: m.totp && m.totp?.isPrimary,
             canBePrimary: true,
+			methodId: m.totp?.methodId,
           })}
+		  <!--
           ${methodCard({
             id: "sms",
             icon: '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
@@ -385,7 +390,9 @@ function renderProfile() {
             isPrimary: m.sms && m.sms.isPrimary,
             canBePrimary: true,
             warn: "Less secure",
+			methodId: m.sms?.methodId,
           })}
+		  -->
           ${methodCard({
             id: "recovery",
             icon: '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15v2m0 0v2m0-2h2m-2 0h-2"/><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
@@ -397,6 +404,7 @@ function renderProfile() {
             configured: m.recoveryCodes,
             isPrimary: false,
             canBePrimary: false,
+			methodId: m.recoveryCodes?.methodId,
           })}
         </div>
       </div>
@@ -435,11 +443,11 @@ function bindLogin() {
 		if (hasAnyMfa(u)) {
 		  session.pendingMfaUser = username;
 		  session.view = "mfa";
-		  render();
 		} else {
 		  session.currentUser = username;
 		  session.view = "welcome";
 		}
+	    render();
 	})();	
   };
   document.getElementById("liSubmit").onclick = submit;
@@ -521,9 +529,10 @@ function bindMfa() {
 	(async () => {
 		let ok = false;
 		if (m === "passkey") {
-			ok = await submitPasskeyChallenge(u.username, methodId);
+			ok = await verifyPasskey(u.username, methodId);
 		} else if (m === "totp") {
-			ok = document.getElementById("mfaCode").value === "123456";
+			const code = document.getElementById("mfaCode").value;
+			ok = await verifyMfaCode(u.username, methodId, code);
 		} else if (m === "sms") {
 			ok = document.getElementById("mfaCode").value === "654321";
 		}
@@ -532,7 +541,7 @@ function bindMfa() {
 			  .getElementById("mfaCode")
 			  .value.trim()
 			  .toUpperCase();
-			ok = await verifyRecoveryCode(u.username, methodId, code);
+			ok = await verifyMfaCode(u.username, methodId, code);
 		}
 		if (ok) {
 			session.currentUser = session.pendingMfaUser;
@@ -565,8 +574,16 @@ function bindProfile() {
   });
   document.querySelectorAll("[data-primary]").forEach((b) => {
     b.onclick = () => {
-      u.mfa.primary = b.getAttribute("data-primary");
-      flash("success", "Primary method updated");
+	  (async () => {
+		const id = b.getAttribute("data-primary");
+		const methodId = b.getAttribute("data-primary-method-id");
+		const data = await setMfaMethodAsPrimary(u.username, methodId);
+		if (data) {
+			await loadUserMfaMethods(u);
+			flash("success", "Primary method updated");
+		}
+		//u.mfa.primary = b.getAttribute("data-primary");
+	  })();
     };
   });
   document.querySelectorAll("[data-remove]").forEach((b) => {
@@ -599,7 +616,7 @@ function bindProfile() {
     document.getElementById("aaVerify").onclick = () => {
 	  (async () => {
 		const code = document.getElementById("aaCode").value;
-		const valid = await completeTotpEnrollment(u.username, code);
+		const valid = await confirmTotpEnrollment(u.username, code);
 		if (valid) {
 		  await loadUserMfaMethods(u);
           flash("success", "Authenticator app enabled");

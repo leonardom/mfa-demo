@@ -36,9 +36,10 @@ function base64urlToArrayBuffer(base64url) {
 
 let credentialID = null;
 
+// Return user's MFA method
 async function getMfaMethodsByUserId(userId) {
 	try {
-		const endpoint = apiBaseUrl + '/users/' + userId + "/mfa/methods";
+		const endpoint = `${apiBaseUrl}/users/${userId}/mfa/methods`;
 		const response = await fetch(endpoint, {
 			method: 'GET' ,
 			headers: {
@@ -56,18 +57,32 @@ async function getMfaMethodsByUserId(userId) {
 	}
 }
 
+// Set MFA method as primary
+async function setMfaMethodAsPrimary(userId, methodId) {
+	try {
+		const endpoint = `${apiBaseUrl}/users/${userId}/mfa/methods/${methodId}/primary`;
+		console.log(`Set MFA method as primary request: PATCH ${endpoint}`);	
+		const response = await fetch(endpoint, {
+			method: 'PATCH' ,
+			headers: {
+				'Content-Type': 'application/json',
+			}
+		});
+		
+		const result = await response.json();
+		console.log("Set MFA method as primary response:",  JSON.stringify(result, null, 2));
+		return result.data;
+	} catch (err) {
+		console.error("Error:", err);
+	}
+}
+
 // Start Passkey Enrollment
 async function startPasskeyEnrollment(userId) {
 	try {
-		
-		const clientContext = {
-			deviceId: getDeviceId(),
-			userAgent: navigator.userAgent
-		}
-		
+				
 		const payload = {
 			"rpId": "example.com",
-			"clientContext": clientContext
 		}
 
 		const endpoint = apiBaseUrl + '/users/' + userId + "/mfa/passkeys/enrollments/options";
@@ -75,6 +90,7 @@ async function startPasskeyEnrollment(userId) {
 			method: 'POST' ,
 			headers: {
 				'Content-Type': 'application/json',
+				'X-Device-Id': getDeviceId(),
 			},
 			body: JSON.stringify(payload)
 		});
@@ -143,100 +159,43 @@ async function completePasskeyEnrollment(userId, enrollmentId, credentialRespons
 	}
 }
 
+
 // MFA Passkey Challenge
-async function submitPasskeyChallenge(userId, methodId) {
+async function verifyPasskey(userId, methodId) {
 	try {
   
-		const clientContext = {
-			deviceId: getDeviceId(),
-			userAgent: navigator.userAgent
-		}
-
-		const expiresAt = new Date(Date.now() + (2 * 60 * 60 * 1000)).toISOString();
-		const payload = {
-			userId,
-			methodId,
-			purpose: "MFA",
-			maxAttempts: 5,
-			expiresAt,
-			clientContext
-		}
-	  
-		const endpoint = apiBaseUrl + '/auth/mfa/challenges';
-		const response = await fetch(endpoint, {
-			method: 'POST' ,
-			headers: {
-				'Content-Type': 'application/json',
-			},
-			body: JSON.stringify(payload)
-		});
-		console.log("Request response:", response);	
+		//1. Submit challenge request
+		const data = await submitMfaChallenge(userId, methodId, "MFA for demo");
 		
-		const result = await response.json();
-		console.log("Success:", result);		
+		//3. Parse response
+		const optionsFromApi = JSON.parse(data.payload.json);
 		
-		const optionsFromApi = JSON.parse(result.data.payload.json);
-		  
+		// change challenge to array buffer
 		optionsFromApi.challenge =
 			base64urlToArrayBuffer(optionsFromApi.challenge);
 
-		// allowCredentials
+		// change allowCredentials to array buffer
 		optionsFromApi.allowCredentials =
 		  optionsFromApi.allowCredentials.map(cred => ({
 			...cred,
 			id: base64urlToArrayBuffer(cred.id)
 		  }));
 
-		return await verifyPasskeyChallengeResponse(result.data.challengeId, optionsFromApi);
-		
-	} catch (err) {
-		console.error("Error:", err);
-		flash("error", "Verification failed");
-	}
-}
-
-// Verify the challenge response
-async function verifyPasskeyChallengeResponse(challengeId, optionsFromApi)
-{
-	try {
 		console.log("Challenge publicKey:", optionsFromApi);
-
+		
+		//4. Get passkey credentials
 		const assertion = await navigator.credentials.get({
 		  publicKey: optionsFromApi
 		});
 		
 		console.log("Assertion:", assertion);
 
-		const payload = {
-			proof: JSON.stringify(assertion)
-		}
-
-		const endpoint = apiBaseUrl + '/auth/mfa/challenges/' + challengeId + '/verify';
-		const response = await fetch(endpoint, {
-			method: 'POST' ,
-			headers: {
-				'Content-Type': 'application/json',
-			},
-			body: JSON.stringify(payload)
-		});
-		console.log("Request response:", response);	
-		
-		const result = await response.json();
-		console.log("Success:", result);
-		
-		if (result.data.accessToken) {
-			localStorage.setItem("mfa-access-token", JSON.stringify({
-				type: result.data.tokenType,
-				token: result.data.accessToken
-			}));
-			return true;
-		}
-		return false;
-	} catch(err) {
+		//5. Verify the challenge
+		return await verifyMfaChallenge(data.challengeId, JSON.stringify(assertion));
+	} catch (err) {
 		console.error("Error:", err);
 		flash("error", "Verification failed");
-		return false;
-	}		
+	}
 }
 
 // Rotate recovery codes
@@ -294,8 +253,8 @@ async function startTotpEnrollment(userId) {
 	}
 }
 
-// Totp start enrollment
-async function completeTotpEnrollment(userId, code) {
+// Totp confirm enrollment
+async function confirmTotpEnrollment(userId, code) {
 	try {
 		const payload = {
 			code
@@ -322,61 +281,50 @@ async function completeTotpEnrollment(userId, code) {
 	}
 }
 
-// MFA Recovery Code
-async function verifyRecoveryCode(userId, methodId, code) {
-	const challengeId = await submitRecoveryCodeChallenge(userId, methodId);
-	if (!challengeId) {
-		flash("error", "Verification failed");
-		return false;
-	}
-	return await verifyRecoveryCodeChallenge(challengeId, code);
-}
-
-// MFA Recovery Code Challenge
-async function submitRecoveryCodeChallenge(userId, methodId) {
-	try {  
-		const clientContext = {
-			deviceId: getDeviceId(),
-			userAgent: navigator.userAgent
-		}
-
+// MFA Code Challenge
+async function submitMfaChallenge(userId, methodId, purpose) {
+	try { 
+		//1. Prepare payload
 		const expiresAt = new Date(Date.now() + (2 * 60 * 60 * 1000)).toISOString();
 		const payload = {
 			userId,
 			methodId,
-			purpose: "MFA",
+			purpose,
 			maxAttempts: 5,
-			expiresAt,
-			clientContext
+			expiresAt
 		}
 	  
+		//2. Submit request
 		const endpoint = apiBaseUrl + '/auth/mfa/challenges';
+		console.log(`MFA challenge request: ${endpoint}`, JSON.stringify(payload, null, 2));	
 		const response = await fetch(endpoint, {
 			method: 'POST' ,
 			headers: {
 				'Content-Type': 'application/json',
+				'X-Device-Id': getDeviceId(),
 			},
 			body: JSON.stringify(payload)
 		});
-		console.log("Request response:", response);	
-		
+	
 		const result = await response.json();
-		console.log("Success:", result);		
-		return result.data.challengeId;
-				
+		console.log("MFA challenge response:",  JSON.stringify(result, null, 2));		
+		
+		return result.data;
 	} catch (err) {
 		console.error("Error:", err);
 		return false;
 	}
 }
 
-async function verifyRecoveryCodeChallenge(challengeId, code) {
+// Verify challenge
+async function verifyMfaChallenge(challengeId, code) {
 	try {
 		const payload = {
 			proof: code
 		}
 
 		const endpoint = apiBaseUrl + '/auth/mfa/challenges/' + challengeId + '/verify';
+		console.log(`MFA verify challenge request: ${endpoint}`, JSON.stringify(payload, null, 2));	
 		const response = await fetch(endpoint, {
 			method: 'POST' ,
 			headers: {
@@ -384,10 +332,9 @@ async function verifyRecoveryCodeChallenge(challengeId, code) {
 			},
 			body: JSON.stringify(payload)
 		});
-		console.log("Request response:", response);	
 		
 		const result = await response.json();
-		console.log("Success:", result);
+		console.log("MFA challenge response:",  JSON.stringify(result, null, 2));
 		
 		if (result.data.accessToken) {
 			localStorage.setItem("mfa-access-token", JSON.stringify({
@@ -402,3 +349,14 @@ async function verifyRecoveryCodeChallenge(challengeId, code) {
 		return false;
 	}
 }
+
+// Verify MFA code
+async function verifyMfaCode(userId, methodId, code) {
+	const { challengeId } = await submitMfaChallenge(userId, methodId, "MFA for demo");
+	if (!challengeId) {
+		flash("error", "Verification failed");
+		return false;
+	}
+	return await verifyMfaChallenge(challengeId, code);
+}
+
