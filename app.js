@@ -294,14 +294,25 @@ function renderProfile() {
 	    const data = await startTotpEnrollment(u.username);
 		const qrcode = document.getElementById("totpQrCode");
 		qrcode.innerHTML = `<img src="data:image:png;base64;${data.totp.qrCodeBase64}" width="140" height="140"/>`
-	  }, 10);
+		
+		const loading = document.getElementById("totp-setup-loading");
+		loading.classList.toggle('hidden');
+		
+		const span = document.getElementById("totp-setup-card");
+		span.classList.toggle('hidden');
+		
+		span.querySelector('.auto-focus-me').focus();
+	  }, 5);
 	   
       return `
         <div class="mfa-setup-card">
-          <p class="panel-desc">Scan the QR code in your authenticator app.</p>
-          <div class="qr-placeholder" id="totpQrCode">[QR CODE]</div>
-          <div class="field"><label>Verification code</label><input id="aaCode" maxlength="6" placeholder="000000" /></div>
-          <button class="btn btn-primary" id="aaVerify">Verify & enable</button>
+          <p id="totp-setup-loading" class="panel-desc">Loading...</p>
+		  <span id="totp-setup-card" class="hidden">
+			  <p class="panel-desc">Scan the QR code in your authenticator app.</p>
+			  <div class="qr-placeholder" id="totpQrCode"></div>
+			  <div class="field"><label>Verification code</label><input id="aaCode" maxlength="6" placeholder="000000" class="auto-focus-me" /></div>
+			  <button class="btn btn-primary" id="aaVerify">Verify & enable</button>		
+		  </span>
         </div>
       `;
     }
@@ -509,11 +520,13 @@ function bindMfa() {
     if (m === "passkey")
       area.innerHTML = `<p class="hint-text">Click Verify to authenticate with your passkey.</p>`;
     else if (m === "totp")
-      area.innerHTML = `<div class="field"><label>6-digit code</label><input id="mfaCode" maxlength="6" placeholder="000000" /></div><p class="hint-subtle">Demo: enter <code>123456</code></p>`;
+      area.innerHTML = `<div class="field"><label>6-digit code</label><input id="mfaCode" maxlength="6" placeholder="000000" class="auto-focus-me"/></div>`;
     else if (m === "sms")
-      area.innerHTML = `<div class="field"><label>SMS code sent to ${u.mfa.sms}</label><input id="mfaCode" maxlength="6" placeholder="000000" /></div><p class="hint-subtle">Demo: enter <code>654321</code></p>`;
+      area.innerHTML = `<div class="field"><label>SMS code sent to ${u.mfa.sms}</label><input id="mfaCode" maxlength="6" placeholder="000000" class="auto-focus-me"/></div><p class="hint-subtle">Demo: enter <code>654321</code></p>`;
     else if (m === "recovery")
-      area.innerHTML = `<div class="field"><label>Recovery code</label><input id="mfaCode" placeholder="XXXXXXXXXX" /></div>`;
+      area.innerHTML = `<div class="field"><label>Recovery code</label><input id="mfaCode" placeholder="XXXX-XXXX-XXXX-XXXX" class="auto-focus-me"/></div>`;
+	const input = area.querySelector('.auto-focus-me');
+	if (input) input.focus();
   }
   sel.onchange = updateInput;
   updateInput();
