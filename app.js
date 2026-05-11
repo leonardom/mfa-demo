@@ -4,10 +4,10 @@ const users = {
     username: "demo1",
     password: "password123",
     mfa: {
-      recoveryCodes: null,
-      passkey: null,
-      totp: null,
-      sms: null,
+      recoveryCodes: false,
+      passkey: false,
+      totp: false,
+      sms: false,
       primary: null,
     },
   },
@@ -17,8 +17,30 @@ const users = {
     mfa: {
       recoveryCodes: false,
       passkey: false,
-      totp: null,
-      sms: null,
+      totp: false,
+      sms: false,
+      primary: null,
+    },
+  },
+  leo: {
+    username: "leo",
+    password: "leo",
+    mfa: {
+      recoveryCodes: false,
+      passkey: false,
+      totp: false,
+      sms: false,
+      primary: null,
+    },
+  },
+  user1: {
+    username: "user1",
+    password: "user1",
+    mfa: {
+      recoveryCodes: false,
+      passkey: false,
+      totp: false,
+      sms: false,
       primary: null,
     },
   },
@@ -177,7 +199,7 @@ function renderHome() {
     <div class="container">
       <div class="hero">
         <h1>Welcome to MFA Demo</h1>
-        <p>A demonstration of multi-factor authentication flows: passkeys, authenticator apps, SMS, and recovery codes.</p>
+        <p>A demonstration of multi-factor authentication flows: passkeys, authenticator apps, and recovery codes.</p>
         <div class="hero-actions">
           <button class="btn btn-primary btn-lg" id="heroSignin">Sign in</button>
           <button class="btn btn-lg" id="heroSignup">Create account</button>
@@ -209,7 +231,7 @@ function renderLogin() {
       <div class="card auth-card">
         <div class="card-body">
           <h2 class="center-title">Sign in</h2>
-          <div class="field"><label>Username</label><input id="liUser" autocomplete="username" autofocus/></div>
+          <div class="field"><label>Username</label><input id="liUser" autocomplete="username" class="auto-focus-me"/></div>
           <div class="field"><label>Password</label><input id="liPass" type="password" autocomplete="current-password" /></div>
           <button class="btn btn-primary btn-block" id="liSubmit">Sign in</button>
           <p class="auth-switch-text">
@@ -227,7 +249,7 @@ function renderSignup() {
       <div class="card auth-card">
         <div class="card-body">
           <h2 class="center-title">Create account</h2>
-          <div class="field"><label>Username</label><input id="suUser" /></div>
+          <div class="field"><label>Username</label><input id="suUser" class="auto-focus-me"/></div>
           <div class="field"><label>Password</label><input id="suPass" type="password" /></div>
           <button class="btn btn-primary btn-block" id="suSubmit">Create account</button>
           <p class="auth-switch-text">
@@ -311,7 +333,7 @@ function renderProfile() {
 			  <p class="panel-desc">Scan the QR code in your authenticator app.</p>
 			  <div class="qr-placeholder" id="totpQrCode"></div>
 			  <div class="field"><label>Verification code</label><input id="aaCode" maxlength="6" placeholder="000000" class="auto-focus-me" /></div>
-			  <button class="btn btn-primary" id="aaVerify">Verify & enable</button>		
+			  <button class="btn btn-primary" id="aaVerify">Verify${!m.totp ? " & enable" : ""}</button>		
 		  </span>
         </div>
       `;
@@ -697,6 +719,9 @@ function render() {
   if (session.view === "signup") bindSignup();
   if (session.view === "mfa") bindMfa();
   if (session.view === "profile") bindProfile();
+  
+  const input = document.querySelector('.auto-focus-me');
+  if (input) input.focus();
 }
 
 document.addEventListener("click", () => {
